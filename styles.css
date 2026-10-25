@@ -137,6 +137,14 @@ button {
   .layout {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  /* Stacked: there is no shared row to borrow a height from, so let the panel
+     take a real content height again — capped so the list scrolls inside the
+     panel instead of pushing the footer off screen. */
+  .history {
+    contain: none;
+    max-height: 60dvh;
+  }
 }
 
 .panel {
@@ -303,6 +311,11 @@ button {
   flex-direction: column;
   gap: 0.9rem;
   min-height: 18rem;
+  /* Size containment keeps this panel out of the grid's intrinsic sizing, so
+     the row is measured from the calculator alone and a growing log can no
+     longer stretch the left column. The panel still stretches into the row,
+     and it is the list below — overflow-y: auto — that finally scrolls. */
+  contain: size;
 }
 
 .history__header {

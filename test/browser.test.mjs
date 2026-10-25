@@ -93,14 +93,50 @@ window.addEventListener('DOMContentLoaded', function () {
 </script>
 `;
 
-function drive() {
+/* Wide two-column pass: reproduces the report that a growing log stretches
+   the calculator vertically instead of scrolling inside its own panel. */
+const WIDE_PROBE = `
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push(String(e.message || e)); });
+window.addEventListener('DOMContentLoaded', function () {
+  var out = { errors: window.__errs };
+  var calc = document.querySelector('.calculator');
+  var history = document.querySelector('.history');
+  var log = document.getElementById('history-log');
+
+  out.columns = getComputedStyle(document.querySelector('.layout'))
+    .gridTemplateColumns.trim().split(/\\s+/).length;
+  out.calcBefore = Math.round(calc.getBoundingClientRect().height);
+  out.pageBefore = document.documentElement.scrollHeight;
+
+  for (var i = 0; i < 40; i++) {
+    document.querySelector('[data-digit="7"]').click();
+    document.querySelector('[data-operator="add"]').click();
+    document.querySelector('[data-digit="1"]').click();
+    document.querySelector('[data-action="equals"]').click();
+  }
+
+  out.items = document.querySelectorAll('.history__item').length;
+  out.calcAfter = Math.round(calc.getBoundingClientRect().height);
+  out.pageAfter = document.documentElement.scrollHeight;
+  out.historyAfter = Math.round(history.getBoundingClientRect().height);
+  out.overflowY = getComputedStyle(log).overflowY;
+  out.logScrolls = log.scrollHeight > log.clientHeight;
+  out.errors = window.__errs;
+  document.title = JSON.stringify(out);
+});
+</script>
+`;
+
+function drive({ width, height = 900, probe = PROBE } = {}) {
   const scratch = join(tmpdir(), 'calc-browser-test');
   rmSync(scratch, { recursive: true, force: true });
   mkdirSync(scratch, { recursive: true });
 
   try {
     for (const f of ['styles.css', 'app.js']) copyFileSync(join(ROOT, f), join(scratch, f));
-    const html = readFileSync(join(ROOT, 'index.html'), 'utf8').replace('</body>', PROBE + '\n  </body>');
+    const html = readFileSync(join(ROOT, 'index.html'), 'utf8').replace('</body>', probe + '\n  </body>');
     writeFileSync(join(scratch, 'index.html'), html);
 
     let dom = '';
@@ -110,6 +146,7 @@ function drive() {
         [
           '--headless=new',
           '--disable-gpu',
+          ...(width ? [`--window-size=${width},${height}`] : []),
           '--no-first-run',
           '--no-default-browser-check',
           `--user-data-dir=${join(scratch, 'profile')}`,
@@ -139,6 +176,12 @@ let cached = null;
 function report() {
   if (!cached) cached = drive();
   return cached;
+}
+
+let cachedWide = null;
+function reportWide() {
+  if (!cachedWide) cachedWide = drive({ width: 1200, height: 900, probe: WIDE_PROBE });
+  return cachedWide;
 }
 
 describe('real page in headless Chrome', { skip }, () => {
@@ -197,5 +240,36 @@ describe('real page in headless Chrome', { skip }, () => {
     // the 780px container breakpoint, so exactly one column is expected.
     assert.equal(r.stackedColumns, 1);
     assert.equal(r.noHorizontalOverflow, true);
+  });
+});
+
+describe('the log scrolls instead of stretching the calculator', { skip }, () => {
+  test('renders two columns at the wide test width', () => {
+    assert.equal(reportWide().columns, 2);
+  });
+
+  test('growing the log leaves the calculator and the page untouched', () => {
+    const r = reportWide();
+    assert.equal(r.items, 40, 'the probe must actually fill the log');
+    assert.equal(r.calcAfter, r.calcBefore, 'calculator height changed with the log');
+    assert.equal(r.pageAfter, r.pageBefore, 'page height grew with the log');
+  });
+
+  test('the log carries its own scrollbar', () => {
+    const r = reportWide();
+    assert.equal(r.overflowY, 'auto');
+    assert.equal(r.logScrolls, true, 'a 40-entry log must overflow its panel');
+  });
+
+  test('both panels still line up at the same height', () => {
+    const r = reportWide();
+    assert.ok(
+      Math.abs(r.historyAfter - r.calcAfter) <= 1,
+      `history ${r.historyAfter}px vs calculator ${r.calcAfter}px`,
+    );
+  });
+
+  test('never throws while being driven wide', () => {
+    assert.deepEqual(reportWide().errors, []);
   });
 });
