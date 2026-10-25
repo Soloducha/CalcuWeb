@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#1b1f2e" />
+    <meta
+      name="description"
+      content="A fast, keyboard-friendly calculator with a persistent calculation log."
+    />
+    <link
+      rel="icon"
+      href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="24" fill="%236d5cf5"/><text x="50" y="70" font-size="56" text-anchor="middle" fill="white" font-family="sans-serif" font-weight="bold">=</text></svg>'
+    />
+    <title>Calculator</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <p class="brand">Calculator</p>
+        <p class="tagline">Fast math, full history.</p>
+      </header>
+
+      <main class="layout">
+        <!-- ── Left column: the calculator ───────────────────────── -->
+        <section class="panel calculator" aria-label="Calculator">
+          <div class="display">
+            <output class="display__expression" id="expression"></output>
+            <output class="display__value" id="display-value">0</output>
+          </div>
+
+          <div class="keypad" id="keypad">
+            <button class="key key--fn" type="button" data-action="clear" aria-label="Clear">
+              C
+            </button>
+            <button
+              class="key key--fn"
+              type="button"
+              data-action="backspace"
+              aria-label="Delete last digit"
+            >
+              &#9003;
+            </button>
+            <button class="key key--fn" type="button" data-action="percent" aria-label="Percent">
+              %
+            </button>
+            <button
+              class="key key--op"
+              type="button"
+              data-operator="divide"
+              aria-label="Divide"
+            >
+              &divide;
+            </button>
+
+            <button class="key" type="button" data-digit="7">7</button>
+            <button class="key" type="button" data-digit="8">8</button>
+            <button class="key" type="button" data-digit="9">9</button>
+            <button
+              class="key key--op"
+              type="button"
+              data-operator="multiply"
+              aria-label="Multiply"
+            >
+              &times;
+            </button>
+
+            <button class="key" type="button" data-digit="4">4</button>
+            <button class="key" type="button" data-digit="5">5</button>
+            <button class="key" type="button" data-digit="6">6</button>
+            <button class="key key--op" type="button" data-operator="subtract" aria-label="Subtract">
+              &minus;
+            </button>
+
+            <button class="key" type="button" data-digit="1">1</button>
+            <button class="key" type="button" data-digit="2">2</button>
+            <button class="key" type="button" data-digit="3">3</button>
+            <button class="key key--op" type="button" data-operator="add" aria-label="Add">+</button>
+
+            <button class="key key--fn" type="button" data-action="negate" aria-label="Toggle sign">
+              &plusmn;
+            </button>
+            <button class="key" type="button" data-digit="0">0</button>
+            <button class="key" type="button" data-action="decimal" aria-label="Decimal point">
+              .
+            </button>
+            <button
+              class="key key--eq"
+              type="button"
+              data-action="equals"
+              aria-label="Equals"
+            >
+              =
+            </button>
+          </div>
+        </section>
+
+        <!-- ── Right column: the read-only calculation log ───────── -->
+        <aside class="panel history" aria-label="Calculation history">
+          <div class="history__header">
+            <h2 class="history__title">History</h2>
+            <button class="history__clear" type="button" id="clear-history" disabled>
+              Clear
+            </button>
+          </div>
+
+          <div class="history__log" id="history-log" role="log" aria-label="Calculation log">
+            <p class="history__empty">No calculations yet</p>
+          </div>
+        </aside>
+      </main>
+
+      <footer class="site-footer">
+        <p>
+          Works with your keyboard: digits, <kbd>+</kbd> <kbd>-</kbd> <kbd>*</kbd>
+          <kbd>/</kbd>, <kbd>Enter</kbd> to calculate, <kbd>Esc</kbd> to clear,
+          <kbd>Backspace</kbd> to delete.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>
