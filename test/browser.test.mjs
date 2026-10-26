@@ -42,6 +42,37 @@ window.addEventListener('DOMContentLoaded', function () {
     el.click();
   }
   function key(k) { document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+  function say(sel) {
+    var el = document.querySelector(sel);
+    return el ? el.textContent.trim().replace(/\\s+/g, ' ') : null;
+  }
+  function label(sel) {
+    var el = document.querySelector(sel);
+    return el ? el.getAttribute('aria-label') : null;
+  }
+
+  /* Static copy is captured before any interaction mutates the page. */
+  out.pageTitle = document.title;
+  out.pageLang = document.documentElement.lang;
+  out.brand = say('.brand');
+  out.tagline = say('.tagline');
+  out.historyTitle = say('.history__title');
+  out.historyClearText = say('#clear-history');
+  out.emptyText = say('.history__empty');
+  out.footerText = say('.site-footer p');
+  out.calculatorLabel = label('.calculator');
+  out.historyPanelLabel = label('.history');
+  out.logLabel = label('#history-log');
+  out.clearKeyLabel = label('[data-action="clear"]');
+  out.backspaceKeyLabel = label('[data-action="backspace"]');
+  out.percentKeyLabel = label('[data-action="percent"]');
+  out.divideKeyLabel = label('[data-operator="divide"]');
+  out.multiplyKeyLabel = label('[data-operator="multiply"]');
+  out.subtractKeyLabel = label('[data-operator="subtract"]');
+  out.addKeyLabel = label('[data-operator="add"]');
+  out.negateKeyLabel = label('[data-action="negate"]');
+  out.decimalKeyLabel = label('[data-action="decimal"]');
+  out.equalsKeyLabel = label('[data-action="equals"]');
 
   click('[data-digit="1"]'); click('[data-digit="2"]');
   click('[data-operator="add"]');
@@ -51,6 +82,7 @@ window.addEventListener('DOMContentLoaded', function () {
   var first = document.querySelector('.history__item');
   out.historyCount = document.querySelectorAll('.history__item').length;
   out.historyLabel = first ? first.getAttribute('aria-label') : null;
+  out.historyItemTitle = first ? first.getAttribute('title') : null;
   out.historyIsButton = first ? first.tagName === 'BUTTON' : false;
   out.clearEnabled = !document.getElementById('clear-history').disabled;
 
@@ -232,6 +264,35 @@ describe('real page in headless Chrome', { skip }, () => {
     assert.equal(r.logRole, 'log');
     assert.equal(r.logIsReadOnly, true);
     assert.equal(r.editableFields, 0);
+  });
+
+  test('every piece of interface copy is in Spanish', () => {
+    const r = report();
+    assert.equal(r.pageLang, 'es', 'the document language must match the copy');
+    assert.equal(r.pageTitle, 'Calculadora');
+    assert.equal(r.brand, 'Calculadora');
+    assert.equal(r.tagline, 'Cálculo rápido, historial completo.');
+    assert.equal(r.historyTitle, 'Historial');
+    assert.equal(r.historyClearText, 'Vaciar');
+    assert.equal(r.emptyText, 'Todavía no hay cálculos');
+    assert.equal(
+      r.footerText,
+      'Funciona con tu teclado: dígitos, + - * /, Enter para calcular, Esc para limpiar, Backspace para borrar.',
+    );
+    assert.equal(r.calculatorLabel, 'Calculadora');
+    assert.equal(r.historyPanelLabel, 'Historial de cálculos');
+    assert.equal(r.logLabel, 'Registro de cálculos');
+    assert.equal(r.clearKeyLabel, 'Limpiar');
+    assert.equal(r.backspaceKeyLabel, 'Borrar el último dígito');
+    assert.equal(r.percentKeyLabel, 'Porcentaje');
+    assert.equal(r.divideKeyLabel, 'Dividir');
+    assert.equal(r.multiplyKeyLabel, 'Multiplicar');
+    assert.equal(r.subtractKeyLabel, 'Restar');
+    assert.equal(r.addKeyLabel, 'Sumar');
+    assert.equal(r.negateKeyLabel, 'Cambiar el signo');
+    assert.equal(r.decimalKeyLabel, 'Separador decimal');
+    assert.equal(r.equalsKeyLabel, 'Igual');
+    assert.equal(r.historyItemTitle, 'Usar este resultado');
   });
 
   test('layout stacks and does not overflow at the tested width', () => {

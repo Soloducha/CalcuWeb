@@ -17,7 +17,7 @@ const MAX_DIGITS = 15;
 const MAX_HISTORY = 100;
 const STORAGE_KEY = 'calculadora-web.history.v1';
 const ERROR_TEXT = 'Error';
-const EMPTY_TEXT = 'No calculations yet';
+const EMPTY_TEXT = 'Todavía no hay cálculos';
 
 const SYM = {
   add: '+',
@@ -405,7 +405,7 @@ function renderHistory() {
       item.type = 'button';
       item.className = 'history__item';
       item.dataset.result = entry.result;
-      item.title = 'Reuse this result';
+      item.title = 'Usar este resultado';
       // textContent concatenates the spans with no spaces, so the readable
       // name has to be supplied explicitly for screen readers and copy/paste.
       item.setAttribute('aria-label', `${entry.expr} = ${result}`);

@@ -471,7 +471,7 @@ describe('markup contract', () => {
 
   test('links the stylesheet and declares the document basics', () => {
     assert.ok(HTML_SRC.includes('href="styles.css"'));
-    assert.ok(HTML_SRC.includes('lang="en"'));
+    assert.ok(HTML_SRC.includes('lang="es"'));
     assert.ok(HTML_SRC.includes('name="viewport"'));
     assert.ok(HTML_SRC.includes('<meta charset="utf-8"'));
   });
