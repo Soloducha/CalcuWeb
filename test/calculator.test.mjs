@@ -23,7 +23,8 @@ const EXPOSE = `
   state, MAX_HISTORY, pageLocale, SEPARATORS,
   formatValue, normalize, applyOp, toNumber, digitCount,
   inputDigit, inputDecimal, inputOperator, equals, clearAll, backspace,
-  negate, percent, squareRoot, restoreResult, addHistory, clearHistory, keyToSelector,
+  negate, percent, squareRoot, openGroup, closeGroup,
+  restoreResult, addHistory, clearHistory, keyToSelector,
   evaluateTokens, PRECEDENCE,
   getHistory: () => calcHistory,
 };
@@ -51,6 +52,8 @@ function type(calc, sequence) {
     else if (ch === '/') calc.inputOperator('divide');
     else if (ch === '^') calc.inputOperator('power');
     else if (ch === 'r') calc.squareRoot();
+    else if (ch === '(') calc.openGroup();
+    else if (ch === ')') calc.closeGroup();
     else if (ch === '=') calc.equals();
     else if (ch === 'C') calc.clearAll();
     else if (ch === '<') calc.backspace();
@@ -318,6 +321,80 @@ describe('square root', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Parentheses                                                         */
+/* ------------------------------------------------------------------ */
+
+describe('parentheses', () => {
+  test('resolves a group before the operator around it', () => {
+    fresh();
+    type(calc, '(2+3)*4=');
+    assert.equal(calc.state.value, '20');
+    assert.equal(calc.getHistory()[0].expr, '(2 + 3) \u00d7 4');
+    fresh();
+    type(calc, '2*(3+4)=');
+    assert.equal(calc.state.value, '14');
+    fresh();
+    type(calc, '(2+3)*(4+1)=');
+    assert.equal(calc.state.value, '25');
+  });
+
+  test('nests groups', () => {
+    fresh();
+    type(calc, '((2+3)*2)=');
+    assert.equal(calc.state.value, '10');
+  });
+
+  test('closes groups left open when "=" is pressed', () => {
+    fresh();
+    type(calc, '(2+3=');
+    assert.equal(calc.state.value, '5');
+    fresh();
+    type(calc, '2*(3+4=');
+    assert.equal(calc.state.value, '14');
+  });
+
+  test('does not reuse the group result once the group is closed', () => {
+    fresh();
+    type(calc, '(2+3)=');
+    assert.equal(calc.state.value, '5');
+    fresh();
+    type(calc, '(2+3)+1=');
+    assert.equal(calc.state.value, '6');
+    fresh();
+    type(calc, '5+(2+3)*2=');
+    assert.equal(calc.state.value, '15');
+  });
+
+  test('reports a failing group at the closing paren, not silently', () => {
+    fresh();
+    type(calc, '(1/0');
+    assert.equal(calc.state.error, false);
+    type(calc, ')');
+    assert.equal(calc.state.value, 'Error');
+    assert.equal(calc.state.error, true);
+  });
+
+  test('ignores a stray ")" and a "(" glued to a number', () => {
+    fresh();
+    type(calc, '5)');
+    assert.equal(calc.state.value, '5');
+    type(calc, '+3=');
+    assert.equal(calc.state.value, '8');
+    fresh();
+    type(calc, '5('); // no implicit multiplication
+    assert.equal(calc.state.value, '5');
+    type(calc, '+3=');
+    assert.equal(calc.state.value, '8');
+  });
+
+  test('keeps a percent inside a group relative to that group', () => {
+    fresh();
+    type(calc, '(100+10%)=');
+    assert.equal(calc.state.value, '110');
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* Percentage                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -556,6 +633,8 @@ describe('keyboard mapping', () => {
     assert.equal(calc.keyToSelector('/'), '[data-operator="divide"]');
     assert.equal(calc.keyToSelector('^'), '[data-operator="power"]');
     assert.equal(calc.keyToSelector('r'), '[data-action="sqrt"]');
+    assert.equal(calc.keyToSelector('('), '[data-action="paren-open"]');
+    assert.equal(calc.keyToSelector(')'), '[data-action="paren-close"]');
   });
 
   test('ignores unmapped keys and modifier combinations', () => {
@@ -583,7 +662,17 @@ describe('markup contract', () => {
     for (const op of ['add', 'subtract', 'multiply', 'divide', 'power']) {
       assert.ok(HTML_SRC.includes(`data-operator="${op}"`), `missing operator ${op}`);
     }
-    for (const action of ['clear', 'backspace', 'percent', 'decimal', 'negate', 'equals', 'sqrt']) {
+    for (const action of [
+      'clear',
+      'backspace',
+      'percent',
+      'decimal',
+      'negate',
+      'equals',
+      'sqrt',
+      'paren-open',
+      'paren-close',
+    ]) {
       assert.ok(HTML_SRC.includes(`data-action="${action}"`), `missing action ${action}`);
     }
   });

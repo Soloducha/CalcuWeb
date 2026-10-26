@@ -32,6 +32,10 @@ const SYM = {
 const PRECEDENCE = { add: 1, subtract: 1, multiply: 2, divide: 2, power: 3 };
 const RIGHT_ASSOCIATIVE = 'power';
 
+/* Grouping tokens live in the same token list as numbers and operators. */
+const OPEN = '(';
+const CLOSE = ')';
+
 function isOperator(token) {
   return Object.prototype.hasOwnProperty.call(PRECEDENCE, token);
 }
@@ -130,7 +134,7 @@ function settle(value) {
   return Number.parseFloat(normalize(value));
 }
 
-/* Evaluates "num op num op num..." with real precedence.
+/* Evaluates "num op num op num..." with real precedence and grouping.
    Returns the canonical string result, or null when any step fails. */
 function evaluateTokens(tokens) {
   const values = [];
@@ -138,6 +142,10 @@ function evaluateTokens(tokens) {
 
   const reduceTop = () => {
     const op = ops.pop();
+    if (op === OPEN) {
+      ops.push(op);
+      return false;
+    }
     const right = values.pop();
     const left = values.pop();
     if (op === undefined || left === undefined || right === undefined) return false;
@@ -148,8 +156,22 @@ function evaluateTokens(tokens) {
   };
 
   for (const token of tokens) {
+    if (token === OPEN) {
+      ops.push(token);
+      continue;
+    }
+
+    if (token === CLOSE) {
+      while (ops.length > 0 && ops[ops.length - 1] !== OPEN) {
+        if (!reduceTop()) return null;
+      }
+      if (ops.length === 0) return null; // a ")" with no matching "("
+      ops.pop(); // drop the "("
+      continue;
+    }
+
     if (isOperator(token)) {
-      while (ops.length > 0) {
+      while (ops.length > 0 && ops[ops.length - 1] !== OPEN) {
         const top = ops[ops.length - 1];
         const bindsTighter =
           token === RIGHT_ASSOCIATIVE
@@ -159,22 +181,80 @@ function evaluateTokens(tokens) {
         if (!reduceTop()) return null;
       }
       ops.push(token);
-    } else {
-      const value = toNumber(token);
-      if (value === null) return null;
-      values.push(value);
+      continue;
     }
+
+    const value = toNumber(token);
+    if (value === null) return null;
+    values.push(value);
   }
 
-  while (ops.length > 0) if (!reduceTop()) return null;
+  while (ops.length > 0) {
+    if (ops[ops.length - 1] === OPEN) return null; // an unclosed "("
+    if (!reduceTop()) return null;
+  }
+
   return values.length === 1 ? normalize(values[0]) : null;
 }
 
-/** Renders a token list as the small expression line: "2 + 3 × 4". */
+/** Renders a token list as the small expression line: "(2 + 3) × 4". */
 function renderTokens(tokens) {
   return tokens
-    .map((token) => (isOperator(token) ? SYM[token] : formatValue(token)))
-    .join(' ');
+    .map((token) => {
+      if (token === OPEN || token === CLOSE) return token;
+      return isOperator(token) ? SYM[token] : formatValue(token);
+    })
+    .join(' ')
+    .replace(/\(\s+/g, OPEN)
+    .replace(/\s+\)/g, CLOSE);
+}
+
+/** Index of the last "(" that has not been closed yet, or -1. */
+function lastUnmatchedOpen(tokens) {
+  let depth = 0;
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    if (tokens[i] === CLOSE) depth++;
+    else if (tokens[i] === OPEN) {
+      depth--;
+      if (depth < 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** Index of the "(" that matches the ")" at closeIndex, or -1. */
+function matchingOpen(tokens, closeIndex) {
+  let depth = 0;
+  for (let i = closeIndex; i >= 0; i--) {
+    if (tokens[i] === CLOSE) depth++;
+    else if (tokens[i] === OPEN) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** True when the token list already holds a complete value (")" counts). */
+function endsWithValue(tokens) {
+  return tokens[tokens.length - 1] === CLOSE;
+}
+
+/** True when the next thing typed has to be a new operand. */
+function expectingOperand() {
+  if (state.tokens.length === 0) return state.waiting || state.value === '0';
+  const last = state.tokens[state.tokens.length - 1];
+  return isOperator(last) || last === OPEN;
+}
+
+/** Running total to show while the expression is still being typed. */
+function previewValue(tokens) {
+  const openIndex = lastUnmatchedOpen(tokens);
+  const scoped = openIndex === -1 ? tokens : tokens.slice(openIndex + 1);
+  const trimmed =
+    scoped.length > 0 && isOperator(scoped[scoped.length - 1]) ? scoped.slice(0, -1) : scoped;
+  if (trimmed.length === 0) return '0';
+  return evaluateTokens(trimmed);
 }
 
 function digitCount(canonical) {
@@ -231,8 +311,9 @@ function showError() {
 
 function startFreshIfResult() {
   // Pressing a digit after "=" or after a history click starts a new number,
-  // but pressing it after an operator continues the current expression.
-  if (state.pendingOp === null) {
+  // but pressing it after an operator — or inside an open group — continues
+  // the current expression.
+  if (state.tokens.length === 0 || endsWithValue(state.tokens)) {
     state.tokens = [];
     state.expression = '';
     state.last = FRESH;
@@ -275,12 +356,14 @@ function inputOperator(op) {
     // Swap the operator without recalculating: "12 +" becomes "12 ×".
     state.tokens[state.tokens.length - 1] = op;
   } else {
-    state.tokens.push(state.value, op);
+    // A closed group already sits in the token list as a complete value.
+    if (!endsWithValue(state.tokens)) state.tokens.push(state.value);
+    state.tokens.push(op);
     // Show the running total of everything typed so far, without the operator
     // whose right operand is still being chosen.
-    const settled = evaluateTokens(state.tokens.slice(0, -1));
-    if (settled === null) return showError();
-    state.value = settled;
+    const preview = previewValue(state.tokens);
+    if (preview === null) return showError();
+    state.value = preview;
   }
 
   state.expression = renderTokens(state.tokens);
@@ -304,7 +387,7 @@ function commit(canonical, exprText, op, operand) {
 function equals() {
   if (state.error) return clearAll();
 
-  if (state.pendingOp === null) {
+  if (state.tokens.length === 0) {
     // Nothing pending: repeat the previous operation, or do nothing at all.
     if (state.last.op === null) return;
     const left = toNumber(state.value);
@@ -315,13 +398,51 @@ function equals() {
     return commit(normalize(result), `${formatValue(state.value)} ${SYM[op]} ${fmt(operand)}`, op, operand);
   }
 
-  const tokens = state.tokens.concat(state.value);
+  const tokens = endsWithValue(state.tokens) ? state.tokens.slice() : state.tokens.concat(state.value);
+  // Auto-close whatever the user left open: "(2 + 3" evaluates like "(2 + 3)".
+  while (lastUnmatchedOpen(tokens) !== -1) tokens.push(CLOSE);
+
   const exprText = renderTokens(tokens);
   const op = state.pendingOp;
   const operand = toNumber(state.value);
   const result = evaluateTokens(tokens);
   if (result === null) return showError();
   commit(result, exprText, op, operand);
+}
+
+/** Opens a group, as in "(2 + 3". Only valid where a new operand is expected. */
+function openGroup() {
+  if (state.error) return clearAll();
+  if (!expectingOperand()) return; // no implicit multiplication: "5(" is ignored
+
+  state.tokens.push(OPEN);
+  state.value = '0';
+  state.waiting = true;
+  state.expression = renderTokens(state.tokens);
+  state.last = FRESH;
+  render();
+}
+
+/** Closes the innermost open group and shows its result. */
+function closeGroup() {
+  if (state.error) return clearAll();
+  if (lastUnmatchedOpen(state.tokens) === -1) return; // nothing to close
+  // "()" or "(2 +)" still has no operand to close over.
+  if (state.waiting && !endsWithValue(state.tokens)) return;
+
+  if (!endsWithValue(state.tokens)) state.tokens.push(state.value);
+  state.tokens.push(CLOSE);
+
+  const closeIndex = state.tokens.length - 1;
+  const openIndex = matchingOpen(state.tokens, closeIndex);
+  const groupValue = evaluateTokens(state.tokens.slice(openIndex + 1, closeIndex));
+  if (groupValue === null) return showError();
+
+  state.value = groupValue;
+  state.waiting = true;
+  state.last = FRESH;
+  state.expression = renderTokens(state.tokens);
+  render();
 }
 
 function backspace() {
@@ -344,7 +465,14 @@ function negate() {
 function leftOperandOf(op) {
   if (op === null) return null;
   for (let i = state.tokens.length - 2; i >= 0; i--) {
-    if (!isOperator(state.tokens[i])) return toNumber(state.tokens[i]);
+    const token = state.tokens[i];
+    if (token === OPEN) return null; // the group has no operand yet
+    if (token === CLOSE) {
+      const open = matchingOpen(state.tokens, i);
+      if (open === -1) return null;
+      return toNumber(evaluateTokens(state.tokens.slice(open, i + 1)));
+    }
+    if (!isOperator(token)) return toNumber(token);
   }
   return null;
 }
@@ -537,6 +665,12 @@ function runAction(btn) {
     case 'sqrt':
       squareRoot();
       break;
+    case 'paren-open':
+      openGroup();
+      break;
+    case 'paren-close':
+      closeGroup();
+      break;
     case 'decimal':
       inputDecimal();
       break;
@@ -573,6 +707,10 @@ function keyToSelector(key) {
     case 'r':
     case 'R':
       return '[data-action="sqrt"]';
+    case '(':
+      return '[data-action="paren-open"]';
+    case ')':
+      return '[data-action="paren-close"]';
     case 'Enter':
     case '=':
       return '[data-action="equals"]';

@@ -141,6 +141,13 @@ window.addEventListener('DOMContentLoaded', function () {
   key('2'); key('^'); key('8'); key('Enter');
   out.keyboardPower = v();
 
+  key('Escape');
+  click('[data-action="paren-open"]'); click('[data-digit="2"]');
+  click('[data-operator="add"]'); click('[data-digit="3"]');
+  click('[data-action="paren-close"]'); click('[data-operator="multiply"]');
+  click('[data-digit="4"]'); click('[data-action="equals"]');
+  out.grouped = v() + ' | ' + x();
+
   out.errors = window.__errs;
   document.title = JSON.stringify(out);
 });
@@ -299,7 +306,7 @@ describe('real page in headless Chrome', { skip }, () => {
     assert.equal(r.emptyText, 'Todavía no hay cálculos');
     assert.equal(
       r.footerText,
-      'Funciona con tu teclado: dígitos, + - * / ^, r para la raíz, Enter para calcular, Esc para limpiar, Backspace para borrar.',
+      'Funciona con tu teclado: dígitos, + - * / ^, ( ) para agrupar, r para la raíz, Enter para calcular, Esc para limpiar, Backspace para borrar.',
     );
     assert.equal(r.calculatorLabel, 'Calculadora');
     assert.equal(r.historyPanelLabel, 'Historial de cálculos');
@@ -325,11 +332,14 @@ describe('real page in headless Chrome', { skip }, () => {
     assert.equal(r.noHorizontalOverflow, true);
   });
 
-  test('offers power and square root as real, labelled keys', () => {
+  test('offers power, root and grouping as real, labelled keys', () => {
     const r = report();
-    assert.equal(r.advancedCount, 2);
-    assert.equal(r.advancedFocusable, 2);
-    assert.equal(r.advancedLabels.join(' | '), 'Raíz cuadrada | Potencia');
+    assert.equal(r.advancedCount, 4);
+    assert.equal(r.advancedFocusable, 4);
+    assert.equal(
+      r.advancedLabels.join(' | '),
+      'Abrir paréntesis | Cerrar paréntesis | Raíz cuadrada | Potencia',
+    );
   });
 
   test('applies operator precedence in the real page', () => {
@@ -340,6 +350,10 @@ describe('real page in headless Chrome', { skip }, () => {
     const r = report();
     assert.equal(r.root, '9');
     assert.equal(r.keyboardPower, '256');
+  });
+
+  test('groups an expression in parentheses end to end', () => {
+    assert.equal(report().grouped, '20 | (2 + 3) × 4 =');
   });
 });
 
