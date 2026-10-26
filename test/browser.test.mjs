@@ -119,6 +119,28 @@ window.addEventListener('DOMContentLoaded', function () {
   out.noHorizontalOverflow =
     document.documentElement.scrollWidth === document.documentElement.clientWidth;
 
+  /* Advanced keys, driven last so the counts above stay intact. */
+  out.advancedCount = document.querySelectorAll('.advanced button').length;
+  out.advancedLabels = Array.prototype.map.call(
+    document.querySelectorAll('.advanced button'),
+    function (b) { return b.getAttribute('aria-label'); },
+  );
+  out.advancedFocusable = document.querySelectorAll('.advanced button:not([disabled])').length;
+
+  key('Escape');
+  click('[data-digit="2"]'); click('[data-operator="add"]');
+  click('[data-digit="3"]'); click('[data-operator="power"]');
+  click('[data-digit="2"]'); click('[data-action="equals"]');
+  out.precedence = v() + ' | ' + x();
+
+  key('Escape');
+  click('[data-digit="8"]'); click('[data-digit="1"]'); click('[data-action="sqrt"]');
+  out.root = v();
+
+  key('Escape');
+  key('2'); key('^'); key('8'); key('Enter');
+  out.keyboardPower = v();
+
   out.errors = window.__errs;
   document.title = JSON.stringify(out);
 });
@@ -277,7 +299,7 @@ describe('real page in headless Chrome', { skip }, () => {
     assert.equal(r.emptyText, 'Todavía no hay cálculos');
     assert.equal(
       r.footerText,
-      'Funciona con tu teclado: dígitos, + - * /, Enter para calcular, Esc para limpiar, Backspace para borrar.',
+      'Funciona con tu teclado: dígitos, + - * / ^, r para la raíz, Enter para calcular, Esc para limpiar, Backspace para borrar.',
     );
     assert.equal(r.calculatorLabel, 'Calculadora');
     assert.equal(r.historyPanelLabel, 'Historial de cálculos');
@@ -301,6 +323,23 @@ describe('real page in headless Chrome', { skip }, () => {
     // the 780px container breakpoint, so exactly one column is expected.
     assert.equal(r.stackedColumns, 1);
     assert.equal(r.noHorizontalOverflow, true);
+  });
+
+  test('offers power and square root as real, labelled keys', () => {
+    const r = report();
+    assert.equal(r.advancedCount, 2);
+    assert.equal(r.advancedFocusable, 2);
+    assert.equal(r.advancedLabels.join(' | '), 'Raíz cuadrada | Potencia');
+  });
+
+  test('applies operator precedence in the real page', () => {
+    assert.equal(report().precedence, '11 | 2 + 3 ^ 2 =');
+  });
+
+  test('takes a square root by click and a power from the keyboard', () => {
+    const r = report();
+    assert.equal(r.root, '9');
+    assert.equal(r.keyboardPower, '256');
   });
 });
 

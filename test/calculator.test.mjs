@@ -23,7 +23,8 @@ const EXPOSE = `
   state, MAX_HISTORY, pageLocale, SEPARATORS,
   formatValue, normalize, applyOp, toNumber, digitCount,
   inputDigit, inputDecimal, inputOperator, equals, clearAll, backspace,
-  negate, percent, restoreResult, addHistory, clearHistory, keyToSelector,
+  negate, percent, squareRoot, restoreResult, addHistory, clearHistory, keyToSelector,
+  evaluateTokens, PRECEDENCE,
   getHistory: () => calcHistory,
 };
 `;
@@ -48,6 +49,8 @@ function type(calc, sequence) {
     else if (ch === '-') calc.inputOperator('subtract');
     else if (ch === '*') calc.inputOperator('multiply');
     else if (ch === '/') calc.inputOperator('divide');
+    else if (ch === '^') calc.inputOperator('power');
+    else if (ch === 'r') calc.squareRoot();
     else if (ch === '=') calc.equals();
     else if (ch === 'C') calc.clearAll();
     else if (ch === '<') calc.backspace();
@@ -161,10 +164,32 @@ describe('arithmetic', () => {
 /* ------------------------------------------------------------------ */
 
 describe('operators and chaining', () => {
-  test('evaluates a chain left to right', () => {
+  test('gives multiplication and division priority over addition', () => {
     fresh();
     type(calc, '2+3*4=');
-    assert.equal(calc.state.value, '20', '2 + 3 = 5, then 5 * 4 = 20');
+    assert.equal(calc.state.value, '14', '3 * 4 must happen before the +');
+    assert.equal(calc.getHistory()[0].expr, '2 + 3 \u00d7 4');
+    fresh();
+    type(calc, '2*3+4=');
+    assert.equal(calc.state.value, '10');
+    fresh();
+    type(calc, '10-6/3=');
+    assert.equal(calc.state.value, '8');
+    fresh();
+    type(calc, '1+2*3+4*5=');
+    assert.equal(calc.state.value, '27', '1 + 6 + 20');
+    fresh();
+    type(calc, '100-6/3*2=');
+    assert.equal(calc.state.value, '96', '6 / 3 * 2 binds before the -');
+  });
+
+  test('keeps same-precedence operators left-associative', () => {
+    fresh();
+    type(calc, '2-3-4=');
+    assert.equal(calc.state.value, '-5', '(2 - 3) - 4');
+    fresh();
+    type(calc, '100/10/2=');
+    assert.equal(calc.state.value, '5', '(100 / 10) / 2');
   });
 
   test('keeps accumulating across several operators', () => {
@@ -184,7 +209,7 @@ describe('operators and chaining', () => {
     fresh();
     type(calc, '12+*');
     assert.equal(calc.state.value, '12');
-    assert.equal(calc.state.accumulator, 12);
+    assert.equal(calc.state.pendingOp, 'multiply');
     assert.equal(calc.state.expression, '12 \u00d7');
   });
 
@@ -199,6 +224,96 @@ describe('operators and chaining', () => {
     type(calc, '9=');
     assert.equal(calc.state.value, '9');
     assert.equal(calc.getHistory().length, 0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Power and root                                                      */
+/* ------------------------------------------------------------------ */
+
+describe('power', () => {
+  test('raises a number to a power and logs the expression', () => {
+    fresh();
+    type(calc, '2^10=');
+    assert.equal(calc.state.value, '1024');
+    assert.equal(calc.getHistory()[0].expr, '2 ^ 10');
+  });
+
+  test('binds tighter than multiplication and addition', () => {
+    fresh();
+    type(calc, '2+3^2=');
+    assert.equal(calc.state.value, '11', '3 ^ 2 must resolve before the +');
+    fresh();
+    type(calc, '2*3^2=');
+    assert.equal(calc.state.value, '18');
+    fresh();
+    type(calc, '3^2+1=');
+    assert.equal(calc.state.value, '10');
+  });
+
+  test('is right-associative: 2^3^2 means 2^(3^2)', () => {
+    fresh();
+    type(calc, '2^3^2=');
+    assert.equal(calc.state.value, '512');
+  });
+
+  test('accepts a fractional exponent', () => {
+    fresh();
+    type(calc, '9^0.5=');
+    assert.equal(calc.state.value, '3');
+  });
+
+  test('refuses results that are not finite numbers', () => {
+    fresh();
+    type(calc, '0^1');
+    calc.negate(); // 0^-1 is Infinity
+    calc.equals();
+    assert.equal(calc.state.value, 'Error');
+    assert.equal(calc.state.error, true);
+    assert.equal(calc.getHistory().length, 0, 'a failed calculation must not be logged');
+
+    fresh();
+    type(calc, '2');
+    calc.negate(); // (-2)^0.5 is NaN
+    type(calc, '^0.5=');
+    assert.equal(calc.state.value, 'Error');
+  });
+});
+
+describe('square root', () => {
+  test('takes the root of the current value immediately', () => {
+    fresh();
+    type(calc, '81r');
+    assert.equal(calc.state.value, '9');
+    fresh();
+    type(calc, '2r');
+    assert.equal(calc.state.value, '1.41421356237');
+  });
+
+  test('participates in a chain like any other operand', () => {
+    fresh();
+    type(calc, '81r+9=');
+    assert.equal(calc.state.value, '18');
+    fresh();
+    type(calc, '9+16r=');
+    assert.equal(calc.state.value, '13');
+  });
+
+  test('is an explicit error for negative numbers', () => {
+    fresh();
+    type(calc, '9');
+    calc.negate();
+    calc.squareRoot();
+    assert.equal(calc.state.value, 'Error');
+    assert.equal(calc.state.error, true);
+  });
+
+  test('clears a previous error instead of stacking on it', () => {
+    fresh();
+    type(calc, '1/0=');
+    calc.squareRoot();
+    assert.equal(calc.state.error, false);
+    assert.equal(calc.state.value, '0');
   });
 });
 
@@ -248,7 +363,15 @@ describe('percentage', () => {
   test('feeds a chain correctly', () => {
     fresh();
     type(calc, '200+10%*2=');
-    assert.equal(calc.state.value, '440');
+    // Precedence now binds "10% * 2" to the multiplication: 200 + 20 * 2.
+    assert.equal(calc.state.value, '240');
+  });
+
+  test('binds a percent to the operand immediately before it', () => {
+    fresh();
+    type(calc, '100+20*5+10%=');
+    // 10% applies to the 5, so: 100 + 20 * 5 + 0.5.
+    assert.equal(calc.state.value, '200.5');
   });
 });
 
@@ -431,6 +554,8 @@ describe('keyboard mapping', () => {
     assert.equal(calc.keyToSelector('-'), '[data-operator="subtract"]');
     assert.equal(calc.keyToSelector('*'), '[data-operator="multiply"]');
     assert.equal(calc.keyToSelector('/'), '[data-operator="divide"]');
+    assert.equal(calc.keyToSelector('^'), '[data-operator="power"]');
+    assert.equal(calc.keyToSelector('r'), '[data-action="sqrt"]');
   });
 
   test('ignores unmapped keys and modifier combinations', () => {
@@ -455,10 +580,10 @@ describe('markup contract', () => {
     for (const d of '0123456789') {
       assert.ok(HTML_SRC.includes(`data-digit="${d}"`), `missing digit ${d}`);
     }
-    for (const op of ['add', 'subtract', 'multiply', 'divide']) {
+    for (const op of ['add', 'subtract', 'multiply', 'divide', 'power']) {
       assert.ok(HTML_SRC.includes(`data-operator="${op}"`), `missing operator ${op}`);
     }
-    for (const action of ['clear', 'backspace', 'percent', 'decimal', 'negate', 'equals']) {
+    for (const action of ['clear', 'backspace', 'percent', 'decimal', 'negate', 'equals', 'sqrt']) {
       assert.ok(HTML_SRC.includes(`data-action="${action}"`), `missing action ${action}`);
     }
   });

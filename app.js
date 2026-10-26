@@ -24,7 +24,17 @@ const SYM = {
   subtract: '\u2212', // −
   multiply: '\u00d7', // ×
   divide: '\u00f7', // ÷
+  power: '^',
 };
+
+/* Precedence table: higher binds tighter. "power" is the only operator that
+   associates to the right, so 2^3^2 is 2^(3^2) and not (2^3)^2. */
+const PRECEDENCE = { add: 1, subtract: 1, multiply: 2, divide: 2, power: 3 };
+const RIGHT_ASSOCIATIVE = 'power';
+
+function isOperator(token) {
+  return Object.prototype.hasOwnProperty.call(PRECEDENCE, token);
+}
 
 /* ------------------------------------------------------------------ */
 /* Locale: derive the group/decimal separators from the browser locale */
@@ -105,9 +115,66 @@ function applyOp(op, a, b) {
       return a * b;
     case 'divide':
       return b === 0 ? null : a / b;
+    case 'power': {
+      // 0^-1 is Infinity and (-8)^0.5 is NaN: neither is a number to show.
+      const result = a ** b;
+      return Number.isFinite(result) ? result : null;
+    }
     default:
       return null;
   }
+}
+
+/** Rounds one intermediate step the way the old left-to-right engine did. */
+function settle(value) {
+  return Number.parseFloat(normalize(value));
+}
+
+/* Evaluates "num op num op num..." with real precedence.
+   Returns the canonical string result, or null when any step fails. */
+function evaluateTokens(tokens) {
+  const values = [];
+  const ops = [];
+
+  const reduceTop = () => {
+    const op = ops.pop();
+    const right = values.pop();
+    const left = values.pop();
+    if (op === undefined || left === undefined || right === undefined) return false;
+    const result = applyOp(op, left, right);
+    if (result === null) return false;
+    values.push(settle(result));
+    return true;
+  };
+
+  for (const token of tokens) {
+    if (isOperator(token)) {
+      while (ops.length > 0) {
+        const top = ops[ops.length - 1];
+        const bindsTighter =
+          token === RIGHT_ASSOCIATIVE
+            ? PRECEDENCE[top] > PRECEDENCE[token]
+            : PRECEDENCE[top] >= PRECEDENCE[token];
+        if (!bindsTighter) break;
+        if (!reduceTop()) return null;
+      }
+      ops.push(token);
+    } else {
+      const value = toNumber(token);
+      if (value === null) return null;
+      values.push(value);
+    }
+  }
+
+  while (ops.length > 0) if (!reduceTop()) return null;
+  return values.length === 1 ? normalize(values[0]) : null;
+}
+
+/** Renders a token list as the small expression line: "2 + 3 × 4". */
+function renderTokens(tokens) {
+  return tokens
+    .map((token) => (isOperator(token) ? SYM[token] : formatValue(token)))
+    .join(' ');
 }
 
 function digitCount(canonical) {
@@ -120,23 +187,24 @@ function digitCount(canonical) {
 
 const state = {
   value: '0', // canonical string shown big
-  accumulator: null, // left operand of the pending operation
-  pendingOp: null, // 'add' | 'subtract' | 'multiply' | 'divide' | null
+  tokens: [], // the live expression as typed: numbers and operator names
   waiting: false, // next digit starts a fresh operand
-  exprText: '', // left-hand side of the pending operation, e.g. "2 + 3"
-  expression: '', // what the small line shows: exprText + operator / "= "
+  expression: '', // what the small line shows
   error: false,
   last: { op: null, operand: null }, // for repeating "="
+  // Derived so callers never dig into the token list by hand.
+  get pendingOp() {
+    const last = this.tokens[this.tokens.length - 1];
+    return isOperator(last) ? last : null;
+  },
 };
 
 const FRESH = { op: null, operand: null };
 
 function resetNumbers() {
   state.value = '0';
-  state.accumulator = null;
-  state.pendingOp = null;
+  state.tokens = [];
   state.waiting = false;
-  state.exprText = '';
   state.expression = '';
   state.error = false;
   state.last = FRESH;
@@ -149,10 +217,8 @@ function clearAll() {
 
 function showError() {
   state.value = ERROR_TEXT;
-  state.exprText = '';
+  state.tokens = [];
   state.expression = '';
-  state.accumulator = null;
-  state.pendingOp = null;
   state.waiting = true;
   state.error = true;
   state.last = FRESH;
@@ -167,7 +233,7 @@ function startFreshIfResult() {
   // Pressing a digit after "=" or after a history click starts a new number,
   // but pressing it after an operator continues the current expression.
   if (state.pendingOp === null) {
-    state.exprText = '';
+    state.tokens = [];
     state.expression = '';
     state.last = FRESH;
   }
@@ -203,72 +269,59 @@ function inputDecimal() {
 
 function inputOperator(op) {
   if (state.error) return; // stay in error until C / Esc
-  const current = toNumber(state.value);
-  if (current === null) return;
+  if (toNumber(state.value) === null) return;
 
-  if (state.pendingOp !== null) {
-    if (state.waiting) {
-      // Swap the operator without recalculating: "12 +" becomes "12 ×".
-    } else {
-      const result = applyOp(state.pendingOp, state.accumulator, current);
-      if (result === null) return showError();
-      const rightText = formatValue(state.value);
-      state.value = normalize(result);
-      state.accumulator = toNumber(state.value);
-      state.exprText = `${state.exprText} ${SYM[state.pendingOp]} ${rightText}`;
-    }
+  if (state.waiting && state.pendingOp !== null) {
+    // Swap the operator without recalculating: "12 +" becomes "12 ×".
+    state.tokens[state.tokens.length - 1] = op;
   } else {
-    state.accumulator = current;
-    state.exprText = formatValue(state.value);
+    state.tokens.push(state.value, op);
+    // Show the running total of everything typed so far, without the operator
+    // whose right operand is still being chosen.
+    const settled = evaluateTokens(state.tokens.slice(0, -1));
+    if (settled === null) return showError();
+    state.value = settled;
   }
 
-  state.expression = `${state.exprText} ${SYM[op]}`;
-  state.pendingOp = op;
+  state.expression = renderTokens(state.tokens);
   state.waiting = true;
   state.last = FRESH;
+  render();
+}
+
+/** Commits a finished calculation: display, history entry and repeat state. */
+function commit(canonical, exprText, op, operand) {
+  state.value = canonical;
+  state.tokens = [];
+  state.expression = `${exprText} =`;
+  state.waiting = true;
+  state.error = false;
+  state.last = op === null ? FRESH : { op, operand };
+  addHistory(exprText, canonical);
   render();
 }
 
 function equals() {
   if (state.error) return clearAll();
 
-  let left;
-  let op;
-  let right;
-  let exprText;
-
-  if (state.pendingOp !== null) {
-    left = state.accumulator;
-    op = state.pendingOp;
-    right = toNumber(state.value);
-    if (left === null || right === null) return;
-    exprText = `${state.exprText} ${SYM[op]} ${formatValue(state.value)}`;
-  } else if (state.last.op !== null) {
-    // Repeat the previous operation: "5 + 3 =" then "=" again.
-    left = toNumber(state.value);
-    op = state.last.op;
-    right = state.last.operand;
-    if (left === null || right === null) return;
-    exprText = `${formatValue(state.value)} ${SYM[op]} ${fmt(right)}`;
-  } else {
-    return; // nothing to evaluate
+  if (state.pendingOp === null) {
+    // Nothing pending: repeat the previous operation, or do nothing at all.
+    if (state.last.op === null) return;
+    const left = toNumber(state.value);
+    if (left === null) return;
+    const { op, operand } = state.last;
+    const result = applyOp(op, left, operand);
+    if (result === null) return showError();
+    return commit(normalize(result), `${formatValue(state.value)} ${SYM[op]} ${fmt(operand)}`, op, operand);
   }
 
-  const result = applyOp(op, left, right);
+  const tokens = state.tokens.concat(state.value);
+  const exprText = renderTokens(tokens);
+  const op = state.pendingOp;
+  const operand = toNumber(state.value);
+  const result = evaluateTokens(tokens);
   if (result === null) return showError();
-
-  const res = normalize(result);
-  state.value = res;
-  state.exprText = exprText;
-  state.expression = `${exprText} =`;
-  state.accumulator = null;
-  state.pendingOp = null;
-  state.waiting = true;
-  state.error = false;
-  state.last = { op, operand: right };
-
-  addHistory(exprText, res);
-  render();
+  commit(result, exprText, op, operand);
 }
 
 function backspace() {
@@ -287,29 +340,47 @@ function negate() {
   render();
 }
 
+/** The number sitting immediately left of the pending operator, or null. */
+function leftOperandOf(op) {
+  if (op === null) return null;
+  for (let i = state.tokens.length - 2; i >= 0; i--) {
+    if (!isOperator(state.tokens[i])) return toNumber(state.tokens[i]);
+  }
+  return null;
+}
+
 function percent() {
   if (state.error) return clearAll();
   const value = toNumber(state.value);
   if (value === null) return;
 
   // "200 + 10%" -> 200 + 20; anywhere else "%" simply means /100.
-  const relative =
-    (state.pendingOp === 'add' || state.pendingOp === 'subtract') &&
-    state.accumulator !== null &&
-    !state.waiting;
+  const op = state.pendingOp;
+  const base = leftOperandOf(op);
+  const relative = (op === 'add' || op === 'subtract') && base !== null && !state.waiting;
 
-  const next = relative ? (state.accumulator * value) / 100 : value / 100;
+  const next = relative ? (base * value) / 100 : value / 100;
   state.value = normalize(next);
+  state.waiting = false;
+  render();
+}
+
+/** Square root of the value on display: immediate, like "%" and "+/-". */
+function squareRoot() {
+  if (state.error) return clearAll();
+  const value = toNumber(state.value);
+  if (value === null) return;
+  if (value < 0) return showError();
+
+  state.value = normalize(Math.sqrt(value));
   state.waiting = false;
   render();
 }
 
 function restoreResult(canonical) {
   state.value = canonical;
-  state.accumulator = null;
-  state.pendingOp = null;
+  state.tokens = [];
   state.waiting = true;
-  state.exprText = '';
   state.expression = '';
   state.error = false;
   state.last = FRESH;
@@ -463,6 +534,9 @@ function runAction(btn) {
     case 'percent':
       percent();
       break;
+    case 'sqrt':
+      squareRoot();
+      break;
     case 'decimal':
       inputDecimal();
       break;
@@ -494,6 +568,11 @@ function keyToSelector(key) {
       return '[data-operator="multiply"]';
     case '/':
       return '[data-operator="divide"]';
+    case '^':
+      return '[data-operator="power"]';
+    case 'r':
+    case 'R':
+      return '[data-action="sqrt"]';
     case 'Enter':
     case '=':
       return '[data-action="equals"]';
@@ -514,7 +593,7 @@ function onKeyDown(event) {
   const selector = keyToSelector(event.key);
   if (!selector) return;
 
-  const btn = document.querySelector(`#keypad ${selector}`);
+  const btn = document.querySelector(`.calculator ${selector}`);
   if (!btn) return;
 
   event.preventDefault(); // stops "/" triggering Firefox quick-find
@@ -528,8 +607,8 @@ function init() {
   logEl = document.getElementById('history-log');
   clearBtn = document.getElementById('clear-history');
 
-  const keypad = document.getElementById('keypad');
-  keypad.addEventListener('click', (event) => {
+  const calculator = document.querySelector('.calculator');
+  calculator.addEventListener('click', (event) => {
     const btn = event.target.closest('button');
     if (btn) runAction(btn);
   });
